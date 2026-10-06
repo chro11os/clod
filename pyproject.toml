@@ -1,0 +1,20 @@
+[project]
+name = "clod"
+version = "0.1.0"
+description = "Desktop AI coding harness for local Ollama models"
+readme = "README.md"
+authors = [
+    { name = "chro11os", email = "neilbragsg@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "pygments>=2.21.0",
+    "pyside6>=6.11.2",
+]
+
+[project.scripts]
+clod = "clod.app:main"
+
+[build-system]
+requires = ["uv_build>=0.12.21,<0.13.0"]
+build-backend = "uv_build"
