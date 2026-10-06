@@ -10,6 +10,7 @@ from PySide6.QtCore import QObject, QSettings, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (
     QActionGroup,
     QColor,
+    QDesktopServices,
     QFont,
     QGuiApplication,
     QKeySequence,
@@ -43,7 +44,7 @@ from PySide6.QtWidgets import (
 )
 
 from clod import history
-from clod.llm import list_models, pull_model, stream_chat, warm_model
+from clod.llm import DEFAULT_MODEL, list_models, pull_model, stream_chat, warm_model
 from clod.skull import Splash, pixel_skull
 
 FONT_FAMILY = "Iosevka Nerd Font"
@@ -199,7 +200,11 @@ class MainWindow(QMainWindow):
 
         # Right side: conversation + prompt box
         self.transcript = QTextBrowser()
-        self.transcript.setOpenExternalLinks(True)
+        # Model output is untrusted: only open web links, never file:// or app schemes.
+        self.transcript.setOpenLinks(False)
+        self.transcript.anchorClicked.connect(
+            lambda url: url.scheme() in ("http", "https") and QDesktopServices.openUrl(url)
+        )
         self.transcript.document().setDocumentMargin(6)
         self.prompt = PromptBox()
         self.prompt.setPlaceholderText("Ask something…  (Enter to send, Shift+Enter for new line)")
@@ -266,6 +271,8 @@ class MainWindow(QMainWindow):
             self.model_box.setCurrentText(select)
         self.model_box.blockSignals(False)
         self.choose_model(self.model)  # once, by hand: signals were blocked above
+        if not models:
+            self.statusBar().showMessage("No models yet. Click “Download model…” to get one.")
 
     def choose_model(self, name):
         if name:
@@ -297,7 +304,11 @@ class MainWindow(QMainWindow):
 
     def download_model(self):
         name, ok = QInputDialog.getText(
-            self, "Download model", "Model name from ollama.com/library (e.g. llama3.2:3b):"
+            self,
+            "Download model",
+            "Model name from ollama.com/library. The default is the one clod is built on;\n"
+            "replace it to download your own (e.g. llama3.2:3b):",
+            text=DEFAULT_MODEL,
         )
         name = name.strip()
         if not ok or not name:

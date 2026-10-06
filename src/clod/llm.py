@@ -3,6 +3,7 @@ import urllib.error
 import urllib.request
 
 OLLAMA_URL = "http://localhost:11434"
+DEFAULT_MODEL = "huihui_ai/qwen3-abliterated:14b"  # what clod is built and tuned against
 
 # Sent first every turn (never saved to history) to keep replies to just the snippet.
 SYSTEM_PROMPT = (
