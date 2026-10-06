@@ -3,7 +3,7 @@ import time
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QImage, QPainter
-from PySide6.QtWidgets import QLabel
+from PySide6.QtWidgets import QLabel, QSizePolicy
 
 SKULL = r"""
            .-''''''''''''''-.
@@ -78,6 +78,28 @@ class Splash(QLabel):
         self.timer.stop()
         self.window.show()  # before closing, so the app never has zero windows
         self.close()
+
+
+class Noise(QLabel):
+    """One line of sparse, flickering glyphs: a signal being picked up. Animates only while shown."""
+
+    def __init__(self):
+        super().__init__()
+        self.setTextFormat(Qt.PlainText)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)  # text never widens the layout
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.flicker)
+
+    def flicker(self):
+        count = self.width() // max(1, self.fontMetrics().horizontalAdvance("#"))
+        self.setText("".join(random.choice(GLITCH) if random.random() < 0.25 else " " for _ in range(count)))
+
+    def showEvent(self, event):
+        self.flicker()
+        self.timer.start(70)
+
+    def hideEvent(self, event):
+        self.timer.stop()
 
 
 # 8-bit skull for the model's chat avatar: "#" = pixel in the text colour.

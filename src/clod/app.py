@@ -14,6 +14,7 @@ from PySide6.QtGui import (
     QFont,
     QGuiApplication,
     QKeySequence,
+    QPixmap,
     QPalette,
     QShortcut,
     QTextBlockFormat,
@@ -27,13 +28,13 @@ from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QInputDialog,
+    QLabel,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
     QMenu,
     QMessageBox,
     QPlainTextEdit,
-    QProgressBar,
     QPushButton,
     QSizePolicy,
     QSplitter,
@@ -45,9 +46,9 @@ from PySide6.QtWidgets import (
 
 from clod import history
 from clod.llm import DEFAULT_MODEL, list_models, pull_model, stream_chat, warm_model
-from clod.skull import Splash, pixel_skull
+from clod.skull import Noise, Splash, pixel_skull
 
-FONT_FAMILY = "Iosevka Nerd Font"
+FONT_FAMILY = "Iosevka Nerd Font Mono"  # falls back to any monospace if missing
 INK = QColor("#111111")
 PAPER = QColor("#fafafa")
 MODES = {  # settings menu: mode -> label
@@ -57,27 +58,37 @@ MODES = {  # settings menu: mode -> label
 AVATAR = QUrl("clod:skull")  # image resource name for the model's avatar
 USER_INDENT = 160  # px your messages are pushed in from the left
 MODEL_INDENT = 60  # px model replies stop short of the right edge
+CARET = " █"  # redaction block trailing a reply while it streams in
 
 
 # The whole UI uses only two colours: fg (text, borders) and bg (background).
 # Light theme = ink on paper, dark theme = paper on ink. Emphasis = invert.
+# Borders only where they mean something: the prompt (where you write) and the
+# three hairlines that split the window. Everything else is bare until hovered.
 STYLE = """
-* {{ background: {bg}; color: {fg}; placeholder-text-color: {fg}; font-family: "{font}"; font-size: 13pt; }}
-QToolBar {{ border: none; border-bottom: 1px solid {fg}; padding: 2px; spacing: 4px; }}
-QPushButton, QComboBox {{ border: 1px solid {fg}; padding: 2px 8px; }}
-QPushButton:hover, QComboBox:hover {{ background: {fg}; color: {bg}; }}
-QComboBox QAbstractItemView {{ border: 1px solid {fg}; selection-background-color: {fg}; selection-color: {bg}; }}
-QListWidget, QTextBrowser, QPlainTextEdit, QLineEdit {{ border: 1px solid {fg}; }}
+* {{ background: {bg}; color: {fg}; placeholder-text-color: {fg}; font-family: "{font}", monospace; font-size: 12pt; }}
+QToolBar {{ border: none; border-bottom: 1px solid {fg}; padding: 6px 10px; spacing: 6px; }}
+QPushButton, QComboBox {{ border: 1px solid transparent; padding: 4px 10px; }}
+QPushButton:hover, QComboBox:hover, QPushButton:pressed {{ background: {fg}; color: {bg}; }}
+QPushButton:focus, QComboBox:focus {{ border-color: {fg}; }}
+#new {{ border-color: {fg}; text-align: left; }}
+QPushButton::menu-indicator {{ width: 0; }}
+QComboBox::drop-down {{ border: none; width: 0; }}
+QComboBox QAbstractItemView {{ border: 1px solid {fg}; padding: 4px; selection-background-color: {fg}; selection-color: {bg}; }}
+QListWidget, QTextBrowser {{ border: none; }}
+QListWidget::item {{ padding: 6px 8px; }}
 QListWidget::item:selected, QListWidget::item:hover {{ background: {fg}; color: {bg}; }}
-QMenu {{ border: 1px solid {fg}; }}
-QMenu::item {{ padding: 2px 12px; }}
+QPlainTextEdit, QLineEdit {{ border: 1px solid {fg}; padding: 8px; }}
+QMenu {{ border: 1px solid {fg}; padding: 4px; }}
+QMenu::item {{ padding: 4px 14px; }}
 QMenu::item:selected {{ background: {fg}; color: {bg}; }}
-*:disabled {{ border-style: dashed; }}
+*:disabled {{ border: 1px dashed {fg}; }}
+QListWidget:disabled {{ border: none; }}
 QSplitter::handle {{ background: {fg}; }}
-QProgressBar {{ border: none; max-height: 3px; }}
-QProgressBar::chunk {{ background: {fg}; }}
-QStatusBar {{ border-top: 1px solid {fg}; }}
-QScrollBar {{ border: none; width: 8px; height: 8px; }}
+#noise {{ font-size: 9pt; }}
+QStatusBar {{ border-top: 1px solid {fg}; padding: 0 6px; }}
+QStatusBar::item {{ border: none; }}
+QScrollBar {{ border: none; width: 4px; height: 4px; }}
 QScrollBar::handle {{ background: {fg}; min-height: 20px; min-width: 20px; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: none; }}
@@ -150,8 +161,8 @@ class Stream(QObject):
 
 
 def compact(layout):
-    layout.setContentsMargins(4, 4, 4, 4)
-    layout.setSpacing(4)
+    layout.setContentsMargins(10, 10, 10, 10)
+    layout.setSpacing(8)
     return layout
 
 
@@ -168,7 +179,10 @@ class MainWindow(QMainWindow):
         self.busy = False
         self.render_pending = False
 
-        # Top bar: model picker, download, theme toggle
+        # Top bar: sigil, model picker, download, theme toggle
+        self.sigil = QLabel()
+        wordmark = QLabel("clod")
+        wordmark.setStyleSheet("font-weight: bold; letter-spacing: 3px; padding-right: 12px;")
         self.model_box = QComboBox()
         self.model_box.setMinimumWidth(220)
         self.model_box.currentTextChanged.connect(self.choose_model)
@@ -182,12 +196,13 @@ class MainWindow(QMainWindow):
         self.settings_button.setMenu(self.settings_menu())
         toolbar = QToolBar()
         toolbar.setMovable(False)
-        for widget in (self.model_box, self.download_button, spacer, self.settings_button, self.theme_button):
+        for widget in (self.sigil, wordmark, self.model_box, self.download_button, spacer, self.settings_button, self.theme_button):
             toolbar.addWidget(widget)
         self.addToolBar(toolbar)
 
         # Left side: new chat button + saved chats
-        self.new_button = QPushButton("New chat")
+        self.new_button = QPushButton("+ New chat")
+        self.new_button.setObjectName("new")
         self.new_button.clicked.connect(self.new_chat)
         self.sidebar = QListWidget()
         self.sidebar.itemClicked.connect(self.open_saved_chat)
@@ -207,15 +222,14 @@ class MainWindow(QMainWindow):
         )
         self.transcript.document().setDocumentMargin(6)
         self.prompt = PromptBox()
-        self.prompt.setPlaceholderText("Ask something…  (Enter to send, Shift+Enter for new line)")
-        self.prompt.setFixedHeight(70)
+        self.prompt.setPlaceholderText("Ask anything.  Enter sends, Shift+Enter adds a line")
+        self.prompt.setFixedHeight(84)
         self.prompt.submitted.connect(self.send)
         right = QWidget()
         right_layout = compact(QVBoxLayout(right))
         right_layout.addWidget(self.transcript)
-        self.loading = QProgressBar()  # shown while the model answers
-        self.loading.setRange(0, 0)  # no known end: Qt animates it as "busy"
-        self.loading.setTextVisible(False)
+        self.loading = Noise()  # flickering glyphs while the model answers
+        self.loading.setObjectName("noise")
         self.loading.hide()
         right_layout.addWidget(self.loading)
         right_layout.addWidget(self.prompt)
@@ -227,6 +241,8 @@ class MainWindow(QMainWindow):
         splitter.setSizes([220, 780])
         self.setCentralWidget(splitter)
         self.statusBar().setSizeGripEnabled(False)
+        # True as long as llm.OLLAMA_URL is localhost.
+        self.statusBar().addPermanentWidget(QLabel("offline. nothing leaves this machine"))
 
         QShortcut(QKeySequence.New, self).activated.connect(self.new_chat)  # Cmd+N
 
@@ -362,6 +378,7 @@ class MainWindow(QMainWindow):
         self.theme = theme
         self.fg, self.bg = (PAPER, INK) if theme == "dark" else (INK, PAPER)
         self.avatar = pixel_skull(self.fg, self.devicePixelRatio())
+        self.sigil.setPixmap(QPixmap.fromImage(self.avatar))
         app = QApplication.instance()
         app.setPalette(two_colour_palette(self.fg, self.bg))
         app.setStyleSheet(STYLE.format(fg=self.fg.name(), bg=self.bg.name(), font=FONT_FAMILY))
@@ -384,7 +401,7 @@ class MainWindow(QMainWindow):
         self.render_pending = False
         messages = self.messages
         if self.reply:
-            messages = messages + [{"role": "assistant", "content": self.reply}]
+            messages = messages + [{"role": "assistant", "content": self.reply + CARET}]
 
         document = self.transcript.document()
         document.clear()
@@ -572,7 +589,9 @@ class MainWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")  # plain style we can fully recolour (native adds greys)
-    app.setFont(QFont(FONT_FAMILY, 13))
+    font = QFont(FONT_FAMILY, 12)
+    font.setStyleHint(QFont.Monospace)
+    app.setFont(font)
     window = MainWindow()  # starts loading the model in the background
     splash = Splash(window)  # shows the window itself once the model is loaded
     splash.show()
