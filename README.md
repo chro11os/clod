@@ -24,7 +24,14 @@ Click **Download model…**, replace the name with any model from [ollama.com/li
 
 ```
 src/clod/
-  app.py      # desktop window (PySide6)
-  llm.py      # Ollama client (streaming)
-  history.py  # saves chats to ~/.clod/chats/
+  app.py              # entry point: sets up Qt, shows the splash, then the window
+  core/               # no Qt in here
+    llm.py            # Ollama client (streaming)
+    history.py        # saves chats to ~/.clod/chats/
+  ui/                 # PySide6
+    main_window.py    # the window: toolbar, sidebar, chat, prompt
+    transcript.py     # draws messages: bubbles, markdown, Monokai code
+    theme.py          # two-colour palette + stylesheet
+    widgets.py        # PromptBox, Stream (worker thread -> UI signals)
+    skull.py          # pixel skull avatar, splash, loading noise
 ```

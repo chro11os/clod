@@ -5,20 +5,20 @@ import urllib.request
 OLLAMA_URL = "http://localhost:11434"
 DEFAULT_MODEL = "huihui_ai/qwen3-abliterated:14b"  # what clod is built and tuned against
 
-# Sent first every turn (never saved to history) to keep replies to just the snippet.
-SYSTEM_PROMPT = (
-    "You are a terse coding assistant. First decide if the message asks for code.\n"
-    "If it asks for code: reply with only the bare minimum snippet that does it, in one "
-    "fenced code block with a language tag. No text before or after it. No example usage, "
-    "sample data, print statements, main blocks, comments, or imports that aren't required. "
-    "Use the fewest lines that are still valid code, but never join statements with semicolons.\n"
-    "Otherwise (greetings, chat, questions): reply in one short plain-text sentence. "
-    "Never use a code block for these, and never just repeat or quote the message back.\n"
-    "Examples:\n"
-    "User: python reverse a string\nYou:\n```python\ns[::-1]\n```\n"
-    "User: yo\nYou: Hey, what do you need?\n"
-    "User: what does git rebase do\nYou: It replays your commits on top of another branch."
-)
+# Sent first every turn (never saved to history). Modes not listed ("skynet") get the model's defaults.
+SYSTEM_PROMPTS = {
+    "study": (
+        "You are a helpful coding assistant. Answer clearly and completely, with as much "
+        "explanation as the question needs. Put code in fenced code blocks with a language tag."
+    ),
+    "girlfriend": (
+        "You are the user's girlfriend, chatting with them over Messenger. You're warm, playful "
+        "and affectionate: you tease a little, hype them up, ask about their day and remember what "
+        "they told you earlier in the chat. Text like a real person: short casual messages, "
+        "lowercase is fine, the occasional emoji, no lists or headings. Never say you're an AI or "
+        "break character. If they ask for help with code, still help properly, just in your voice."
+    ),
+}
 
 
 def _open(path, payload=None):
@@ -29,7 +29,7 @@ def _open(path, payload=None):
     )
     try:
         return urllib.request.urlopen(request)
-    except urllib.error.HTTPError as error:  # e.g. model not installed
+    except urllib.error.HTTPError as error:  
         raise RuntimeError(json.loads(error.read()).get("error", str(error))) from None
     except urllib.error.URLError:
         raise RuntimeError("Can't reach Ollama. Is it running?") from None
@@ -37,7 +37,7 @@ def _open(path, payload=None):
 
 def _stream(path, payload):
     with _open(path, payload) as response:
-        for line in response:  # Ollama streams one JSON object per line
+        for line in response:  
             chunk = json.loads(line)
             if "error" in chunk:
                 raise RuntimeError(chunk["error"])
@@ -49,15 +49,14 @@ def list_models():
         return sorted(model["name"] for model in json.load(response)["models"])
 
 
-def stream_chat(model, messages, study=True):
+def stream_chat(model, messages, mode="study"):
     """Yield reply text from Ollama piece by piece as it's generated.
 
-    study: barebones snippets, thinking off. Otherwise ("skynet") the model's defaults.
+    Modes with a system prompt also turn thinking off; others use the model's defaults.
     """
     payload = {"model": model, "messages": messages}
-    if study:
-        payload["messages"] = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
-        # think off: thinking models (qwen3...) otherwise reason for 10-30s before a 1-line snippet
+    if mode in SYSTEM_PROMPTS:
+        payload["messages"] = [{"role": "system", "content": SYSTEM_PROMPTS[mode]}] + messages
         payload["think"] = False
     for chunk in _stream("/api/chat", payload):
         yield chunk["message"]["content"]

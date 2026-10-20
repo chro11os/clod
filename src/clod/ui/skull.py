@@ -2,8 +2,8 @@ import random
 import time
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QImage, QPainter
-from PySide6.QtWidgets import QLabel, QSizePolicy
+from PySide6.QtGui import QIcon, QImage, QPainter, QPixmap
+from PySide6.QtWidgets import QLabel
 
 SKULL = r"""
            .-''''''''''''''-.
@@ -80,28 +80,6 @@ class Splash(QLabel):
         self.close()
 
 
-class Noise(QLabel):
-    """One line of sparse, flickering glyphs: a signal being picked up. Animates only while shown."""
-
-    def __init__(self):
-        super().__init__()
-        self.setTextFormat(Qt.PlainText)
-        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)  # text never widens the layout
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.flicker)
-
-    def flicker(self):
-        count = self.width() // max(1, self.fontMetrics().horizontalAdvance("#"))
-        self.setText("".join(random.choice(GLITCH) if random.random() < 0.25 else " " for _ in range(count)))
-
-    def showEvent(self, event):
-        self.flicker()
-        self.timer.start(70)
-
-    def hideEvent(self, event):
-        self.timer.stop()
-
-
 # 8-bit skull for the model's chat avatar: "#" = pixel in the text colour.
 PIXEL_SKULL = (
     "...#######...",
@@ -133,6 +111,18 @@ def pixel_skull(color, pixel_ratio, cell=2):
     image.setDevicePixelRatio(scale / cell)
     return image
 
+
+
+def skull_icon(fg, bg, size=256):
+    """App icon: the pixel skull on a solid square, so it reads on any panel colour."""
+    cell = size // 16
+    skull = pixel_skull(fg, 1, cell)
+    pixmap = QPixmap(size, size)
+    pixmap.fill(bg)
+    painter = QPainter(pixmap)
+    painter.drawImage((size - skull.width()) // 2, (size - skull.height()) // 2, skull)
+    painter.end()
+    return QIcon(pixmap)
 
 if __name__ == "__main__":  # self-check: frames keep a fixed size so the splash never jitters
     sizes = {tuple(map(len, glitch_frame(t, "waking test").splitlines())) for t in range(500)}
